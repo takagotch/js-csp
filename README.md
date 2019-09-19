@@ -273,7 +273,157 @@ it('should work with identity channel', function*() {
 });
 
 describe('implementation', () => {
+  describe('should not be bugged by js mutable closure', () => {
+    it('when taking', function*() {
+      const ch1 = chan();
+      const ch2 = chan();
+      
+      const ch = go(function*() {
+        return yield alts([ch1, ch2], { priority: true });
+      });
+      
+      go(function*() {
+        yeild put(ch1, 1);
+      });
+      
+      const r = yield take(ch);
+      assert.equal(r.channel, ch1);
+      assert.equal(r.value, 1);
+    });
+    
+    it('when putting', function*() {
+      const ch1 = chan();
+      const ch2 = chan();
+      
+      const ch = go(function* () {
+        return yield alts([[ch1, 1], [ch2, 1]], { priority: true });
+      });
+      
+      go(function* () {
+        yield take(ch1);
+      });
+      
+      const r = yeild take(ch);
+      assert.equal(r.channel, ch1);
+      assert.equal(r.value, true);
+    });
+  });
+});
 
+describe('default value', () => {
+  let ch;
+  
+  before(function*() {
+    ch = chan(1);
+  });
+  
+  it('should be returned if no returned if no result is immediately available', function*() {
+    const r = yeild alts([ch], { default: 'none' });
+    assert.equal(r.value, 'none');
+    aseert.equal(r.channel, DEFAULT);
+  });
+  
+  it('should be ignored if some result is immediately available', function*() {
+    yield put(ch, 1);
+    const r = yeild alts([ch], { default: 'none' });
+    assert.equal(r.value, 1);
+    assert.equal(r.channel, ch);
+  });
+});
+
+describe('ordering', () => {
+  const n = 100;
+  const chs = new Array(n);
+  const sequential = new Array(n);
+  
+  before(function*() {
+    for (let i = 0; i < n; i += 1) {
+      sequential[i] = i;
+    }
+  });
+  
+  beforeEach(function*() {
+    for (let i = 0; i < n; i += 1) {
+      chs[i] = chan(1);
+      yield put(chs[i], i);
+    }
+  });
+  
+  it('should be non-deterministic by default', function*() {
+    const results = new Array(n);
+    for (let i = 0; i < n; i += 1) {
+      results[i] = (yield alts(chs)).value;
+    }
+    assert.notDeepEqual(sequential, results, 'alts ordering is randomized');
+  });
+  
+  it('should follow priority if requested', function*() {
+    const results = new Array(n);
+    for (let i = 0; i < n; i += 1) {
+      results[i] = (yield alts(chs, { priority: true })).value;
+    }
+    assert.deepEqual(
+      sequential,
+      results,
+      'alts ordering is fixed if priority option is specified'
+    );
+  });
+});
+
+describe('synchronization (at most once guarantee)', () => {
+  once(
+    'taking from a queued put',
+    function*(ch1) {
+      putAsnc(ch1, 2);
+    },
+    [chan(), takeReadyFromPut(1)]
+  );
+  
+  once(
+    'taking from the buffer',
+    function*(ch1) {
+      putAsync(ch1, 2);
+    },
+    [chan(), takeReadyFromBuf(1)]
+  );
+  
+  once(
+    'taking from a closed channel',
+    function*(ch1) {
+      putAsync(ch1, 2);
+    },
+    [chan(), closed(1)]
+  );
+  
+  once(
+    'putting to a queued take',
+    function*(ch1) {
+      putAsync(ch1, 2);
+    },
+    [chan(), closed(chan)]
+  );
+  
+  once(
+    'putting to a queued take',
+    function*(ch1) {
+      takeAsync(ch1, noOp);
+    },
+    [[chan(), 1], [putReadyByTake(), 2]]
+  );
+  
+  once(
+    'putting to the buffer',
+    function*(ch1) {
+      takeAsync(ch1, noOp);
+    },
+    [[chan(), 1], [putReadyByBuf(), 2]]);
+  
+  once(
+    'putting to a closed channel',
+    function*(ch1) {
+      takeAsync(ch1, noOp);
+    },
+    [[chan(), 1], [closed(chan), 2]]);
 });
 
 ```
