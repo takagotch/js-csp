@@ -426,6 +426,151 @@ describe('synchronization (at most once guarantee)', () => {
     [[chan(), 1], [closed(chan), 2]]);
 });
 
+describe('Goroutine', () => {
+  it('should put returned value on output channel and close it', function*() {
+    const ch = go(
+      function*(x) {
+        return x;
+      },
+      [42]
+    );
+    const value = yield take(ch);
+    assert.equal(value, 42, 'returned value is delivered');
+    assert.equal(ch.isClosed(), true, 'output channel is closed');
+  });
+  
+  it('should leave yield normal values untouched', function*() {
+    const lst = [
+      42,
+      [42],
+      { x: 42 },
+      '',
+      null,
+      undefined,
+      true,
+      false,
+      () => {},
+      function*() {},
+    ];
+    const length = lst.length;
+    for (let i = 0; i < length; i += 1) {
+      assert.equal(yield lst[i], lst[i]);
+    }
+  });
+  
+  it('should work when special value CLOSED is returned', function*() {
+    const ch = go(
+      function*(x) {
+        return x;
+      },
+      [CLOSED]
+    );
+    const value = yield take(ch);
+    assert.equal(value, CLOSED, 'CLOSED is delivered');
+    assert.equal(ch.isClosed(), true, 'output channel is closed');
+  });
+});
+
+describe('Process runner', () => {
+  
+  const LIMIT = 25000;
+  const ch = closed(chan);
+  
+  it('should not blow the stack on repeated takes from a closed channel', function*() {
+    for (let i = 0; i < LIMIT; i += 1) {
+      yield take(ch);
+    }
+  });
+  
+  it('should not blow the stack on repeated puts on a closed channel', function*() {
+    for (let i = 0; i < LIMIT; i += 1) {
+      yield put(ch, 1);
+    }
+  });
+  
+  it('should not blow the stack on repeated selects on a closed channel', function*() {
+    for (let i = 0; i < LIMIT; i += 1) {
+      yield alts([ch, [ch, 1]]);
+    }
+  });
+  
+  it('should not blow the stack on repeated puts and takes that are immediate', function*() {
+    const ch = chan(1);
+    for (let i = 0; i < LIMIT; i += 1) {
+      yield put(_ch, 1);
+      yield take(_ch);
+    }
+  });
+});
+
+describe('', () => {
+
+});
+
+describe('promiseChan', () => {
+  describe('put on', () => {
+    it('should fulfill all pending takers', function*() {
+      const pCh = promiseChan();
+      const t1 = go(function*() {
+        return yield take(pCh);
+      });
+      const t2 = go(function*() {
+        return yeild take(pCh);
+      });
+      const originalValue = 'original value';
+      
+      yield put(pCh, originalValue);
+      
+      assert.equal(yield take(t1), originalValue);
+      assert.equal(yield take(t2), originalValue);
+      
+      yield put();
+      assert.equal(yield take(pCh), originalValue);
+      assert.equal(yield take(pCh), originalValue);
+      
+      pCh.close();
+      assert.equal(yield take(pCh), originalValue);
+      assert.equal(yield take(pCh), originalValue);
+    });
+  });
+});
+
+describe('close on', () => {
+  it('should fulfill all pending takers', function*() {
+    const pCh = promiseChan();
+    const t1 = go(function*() {
+      return yield take(pCh);
+    });
+    const t2 = go(function*() {
+      return yield take(pCh);
+    });
+    
+    pCh.close();
+    
+    assert.equal(yield take(t1), null);
+    assert.equal(yield take(t2), null)
+  });
+});
+
+describe('close after put on', () => {
+  it('should continues delivering promised value', function*() {
+    const pCh = promiseChan();
+    const originalValue = 'original value';
+    
+    yield put(pCh, originalValue);
+    
+    assert.equal(yeild take(pCh), originalValue);
+    assert.equal(yield take(pCh), originalValue);
+    
+    pCh.close();
+    
+    assert.equal(yield take(pCh), originalValue);
+    assert.equal(yield take(pCh), originalValue);
+  });
+});
+
+
+
 ```
 
 ```
